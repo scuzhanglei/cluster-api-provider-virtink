@@ -8,6 +8,7 @@ infrastructure-components.yaml
 *.dylib
 bin
 testbin/*
+_artifacts
 
 # Test binary, build with `go test -c`
 *.test

@@ -11,36 +11,6 @@ else
 GOBIN=$(shell go env GOBIN)
 endif
 
-REPO_ROOT := $(shell git rev-parse --show-toplevel)
-
-## --------------------------------------
-## Binaries
-## --------------------------------------
-
-TOOLS_DIR := $(REPO_ROOT)/hack/tools
-BIN_DIR := bin
-TOOLS_BIN_DIR := $(TOOLS_DIR)/$(BIN_DIR)
-GINKGO := $(TOOLS_BIN_DIR)/ginkgo
-
-$(GINKGO): # Build ginkgo from tools folder.
-	cd $(TOOLS_DIR) && go build -tags=tools -o $(BIN_DIR)/ginkgo github.com/onsi/ginkgo/ginkgo
-
-$(KUSTOMIZE): # Build kustomize from tools folder.
-	$(REPO_ROOT)/hack/ensure-kustomize.sh
-
-GINKGO_FOCUS  ?=
-GINKGO_SKIP ?=
-E2E_CONF_FILE  ?= ${REPO_ROOT}/test/e2e/config/virtink.yaml
-ARTIFACTS ?= ${REPO_ROOT}/_artifacts
-SKIP_RESOURCE_CLEANUP ?= false
-USE_EXISTING_CLUSTER ?= true
-GINKGO_NOCOLOR ?= false
-
-# to set multiple ginkgo skip flags, if any
-ifneq ($(strip $(GINKGO_SKIP)),)
-_SKIP_ARGS := $(foreach arg,$(strip $(GINKGO_SKIP)),-skip="$(arg)")
-endif
-
 # Setting SHELL to bash allows bash commands to be executed by recipes.
 # This is a requirement for 'setup-envtest.sh' in the test target.
 # Options are set to exit when a recipe line exits non-zero or a piped command fails.
@@ -87,7 +57,7 @@ vet: ## Run go vet against code.
 
 .PHONY: test
 test: manifests generate fmt vet envtest ## Run tests.
-	KUBEBUILDER_ASSETS="$(shell $(ENVTEST) use $(ENVTEST_K8S_VERSION) -p path)" go test ./... -coverprofile cover.out
+	KUBEBUILDER_ASSETS="$(shell $(ENVTEST) use $(ENVTEST_K8S_VERSION) -p path)" go test ./api/... ./controllers/... -coverprofile cover.out
 
 ##@ Build
 
@@ -141,15 +111,18 @@ $(LOCALBIN):
 KUSTOMIZE ?= $(LOCALBIN)/kustomize
 CONTROLLER_GEN ?= $(LOCALBIN)/controller-gen
 ENVTEST ?= $(LOCALBIN)/setup-envtest
+GINKGO ?= $(LOCALBIN)/ginkgo
 
 ## Tool Versions
 KUSTOMIZE_VERSION ?= v3.8.7
 CONTROLLER_TOOLS_VERSION ?= v0.8.0
+GINKGO_VERSION ?= v1.16.5
 
 KUSTOMIZE_INSTALL_SCRIPT ?= "https://raw.githubusercontent.com/kubernetes-sigs/kustomize/master/hack/install_kustomize.sh"
 .PHONY: kustomize
 kustomize: $(KUSTOMIZE) ## Download kustomize locally if necessary.
 $(KUSTOMIZE): $(LOCALBIN)
+	rm -rf $(KUSTOMIZE)
 	curl -s $(KUSTOMIZE_INSTALL_SCRIPT) | bash -s -- $(subst v,,$(KUSTOMIZE_VERSION)) $(LOCALBIN)
 
 .PHONY: controller-gen
@@ -162,11 +135,21 @@ envtest: $(ENVTEST) ## Download envtest-setup locally if necessary.
 $(ENVTEST): $(LOCALBIN)
 	GOBIN=$(LOCALBIN) go install sigs.k8s.io/controller-runtime/tools/setup-envtest@latest
 
+.PHONY: ginkgo
+ginkgo: $(GINKGO)
+$(GINKGO): $(LOCALBIN)
+	GOBIN=$(LOCALBIN) go install github.com/onsi/ginkgo/ginkgo@$(GINKGO_VERSION)
+
+REPO_ROOT := $(shell git rev-parse --show-toplevel)
+E2E_CONF_FILE  ?= ${REPO_ROOT}/test/e2e/config/virtink.yaml
+ARTIFACTS ?= ${REPO_ROOT}/_artifacts
+SKIP_RESOURCE_CLEANUP ?= false
+USE_EXISTING_CLUSTER ?= true
 
 .PHONY: e2e
 #e2e: $(GINKGO) cluster-templates ## Run the end-to-end tests
-e2e: kustomize $(GINKGO)
-	$(GINKGO) -v -trace -tags=e2e -focus="$(GINKGO_FOCUS)" $(_SKIP_ARGS) ./test/e2e -- \
+e2e: kustomize ginkgo
+	$(GINKGO) -v -trace -tags=e2e ./test/e2e -- \
 	    -e2e.artifacts-folder="$(ARTIFACTS)" \
 	    -e2e.config="$(E2E_CONF_FILE)" \
 	    -e2e.skip-resource-cleanup=$(SKIP_RESOURCE_CLEANUP) -e2e.use-existing-cluster=$(USE_EXISTING_CLUSTER)
